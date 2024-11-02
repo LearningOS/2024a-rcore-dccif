@@ -5,7 +5,7 @@ use crate::{
         exit_current_and_run_next, get_syscall_times, get_task_time, suspend_current_and_run_next,
         TaskStatus,
     },
-    timer::{get_time_ms, get_time_us},
+    timer::get_time_us,
 };
 
 #[repr(C)]

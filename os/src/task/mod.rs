@@ -18,7 +18,6 @@ use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_ms;
-use alloc::collections::btree_map::Cursor;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -193,14 +192,17 @@ pub fn exit_current_and_run_next() {
     run_next_task();
 }
 
+/// increase the syscall count of current task
 pub fn increase_syscall_times(syscall_id: usize) {
     TASK_MANAGER.increase_syscall_count(syscall_id);
 }
 
+/// get the syscall count of current task
 pub fn get_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
     TASK_MANAGER.get_syscall_times()
 }
 
+/// get the time of current task
 pub fn get_task_time() -> usize {
     TASK_MANAGER.get_task_time()
 }
