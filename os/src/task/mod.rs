@@ -14,17 +14,16 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
-use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
-use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
+use crate::config::MAX_SYSCALL_NUM;
+use crate::timer::get_time_ms;
 pub use context::TaskContext;
 
 /// The task manager, where all the tasks are managed.
@@ -81,8 +80,8 @@ impl TaskManager {
     fn run_first_task(&self) -> ! {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
-        next_task.task_status = TaskStatus::Running;
         next_task.task_time = get_time_ms();
+        next_task.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -143,9 +142,11 @@ impl TaskManager {
         if let Some(next) = self.find_next_task() {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
+            let temp_task_time = inner.tasks[current].task_time;
+            let current_time = get_time_ms();
+            inner.tasks[current].task_time = current_time - temp_task_time;
+            inner.tasks[next].task_time = current_time;
             inner.tasks[next].task_status = TaskStatus::Running;
-            inner.tasks[current].task_time = get_time_ms() - inner.tasks[current].task_time;
-            inner.tasks[next].task_time = get_time_ms();
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -160,34 +161,31 @@ impl TaskManager {
         }
     }
 
-    fn get_syscall_times(&self) -> [u32; MAX_SYSCALL_NUM] {
-        let inner = self.inner.exclusive_access();
-        inner.tasks[inner.current_task].task_syscall_times
-    }
-
-    fn get_current_task_time(&self) -> usize {
-        let inner = self.inner.exclusive_access();
-        inner.tasks[inner.current_task].task_time
-    }
-
     fn update_syscall_times(&self, syscall_id: usize) {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_syscall_times[syscall_id] += 1;
     }
-
-    fn insert_framed_area(&self, start: VirtAddr, end: VirtAddr, permission: MapPermission) {
-        let mut inner = self.inner.exclusive_access();
+    fn get_syscall_times(&self) -> [u32; MAX_SYSCALL_NUM] {
+        let inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        inner.tasks[current]
-            .memory_set
-            .insert_framed_area(start, end, permission);
+        inner.tasks[current].task_syscall_times
+    }
+    fn get_task_time(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_time
     }
 
-    fn drop_frame_area(&self, start: VirtAddr, end: VirtAddr) {
+    fn mmap_cur_task(&self, start: usize, len: usize, port: usize) -> Result<(), &'static str> {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        inner.tasks[current].memory_set.drop_frame_area(start, end);
+        inner.tasks[current].memory_set.alloc_vm(start, len, port)
+    }
+    fn munmap_cur_task(&self, start: usize, len: usize) -> Result<(), &'static str> {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.free_vm(start, len)
     }
 }
 
@@ -244,22 +242,22 @@ pub fn get_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
     TASK_MANAGER.get_syscall_times()
 }
 
-/// Get the total running time of current task.
-pub fn get_current_task_time() -> usize {
-    TASK_MANAGER.get_current_task_time()
-}
-
-/// Update the syscall times of current task.
+/// Update the current 'Running' task's syscall times.
 pub fn update_syscall_times(syscall_id: usize) {
     TASK_MANAGER.update_syscall_times(syscall_id);
 }
 
-/// Insert a new framed area into the memory set of the task.
-pub fn insert_framed_area(start: VirtAddr, end: VirtAddr, permission: MapPermission) {
-    TASK_MANAGER.insert_framed_area(start, end, permission);
+/// Get the current 'Running' task's time between the system call time and the first time the task is scheduled
+pub fn get_task_time() -> usize {
+    TASK_MANAGER.get_task_time()
 }
 
-/// Drop a framed area from the memory set of the task.
-pub fn drop_frame_area(start: VirtAddr, end: VirtAddr) {
-    TASK_MANAGER.drop_frame_area(start, end);
+/// alloc a new virtual memory
+pub fn mmap_cur_task(start: usize, len: usize, port: usize) -> Result<(), &'static str> {
+    TASK_MANAGER.mmap_cur_task(start, len, port)
+}
+
+/// free virtual memory
+pub fn munmap_cur_task(start: usize, len: usize) -> Result<(), &'static str> {
+    TASK_MANAGER.munmap_cur_task(start, len)
 }

@@ -26,6 +26,26 @@ bitflags! {
         const D = 1 << 7;
     }
 }
+impl From<usize> for  PTEFlags {
+    fn from(value: usize) -> Self {
+        let mut pte_flags=PTEFlags::empty();
+        if value & (1 << 0) != 0 {
+            pte_flags |= PTEFlags::R;
+        }
+        if value & (1 << 1) != 0 {
+            pte_flags |= PTEFlags::W;
+        }
+        if value & (1 << 2) != 0 {
+            pte_flags |= PTEFlags::X;
+        }
+        if value & !0b111 != 0 {
+            panic!("other bits must be 0");
+        }
+        pte_flags |= PTEFlags::U;
+        pte_flags |= PTEFlags::V;
+        pte_flags
+    }
+}
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -178,14 +198,4 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
-}
-
-/// Translate a virtual address to a physical address
-pub fn translate_va_to_pa(token: usize, ptr: usize) -> usize {
-    let page_table = PageTable::from_token(token);
-    let va = VirtAddr::from(ptr);
-    let vpn = va.floor();
-    let ppn = page_table.translate(vpn).unwrap().ppn();
-    let pa = usize::from(ppn) << 12 | va.page_offset();
-    pa.into()
 }
